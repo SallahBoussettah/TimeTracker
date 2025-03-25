@@ -93,7 +93,7 @@ const CalendarPage = () => {
   
   // Project colors map for consistent coloring
   const projectColors: Record<string, string> = {
-    'default': 'bg-blue-500',
+    'default': 'bg-blue-600 text-white',
   };
   
   // Optimized fetchTimeEntries with caching
@@ -231,7 +231,13 @@ const CalendarPage = () => {
         setProjects(projectsCache);
         
         // Setup project colors
-        const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500'];
+        const colors = [
+          'bg-blue-600 text-white',
+          'bg-green-600 text-white',
+          'bg-purple-600 text-white',
+          'bg-orange-600 text-white',
+          'bg-pink-600 text-white'
+        ];
         projectsCache.forEach((project, index) => {
           projectColors[project.id] = colors[index % colors.length];
         });
@@ -260,21 +266,51 @@ const CalendarPage = () => {
     }
   }, [user, startDate, endDate]);
   
+  // Improved getEntriesForDay function to handle timezone issues better
   const getEntriesForDay = (day: Date) => {
-    return timeEntries.filter(entry => {
-      const entryDate = parseISO(entry.start_time);
-      return isSameDay(entryDate, day);
-    }).map(entry => {
+    // Set hours to 0 for comparison to avoid timezone issues
+    const comparisonDay = new Date(day);
+    comparisonDay.setHours(0, 0, 0, 0);
+    
+    const entriesForDay = timeEntries.filter(entry => {
+      try {
+        // Parse the date and normalize it for comparison
+        const entryDate = parseISO(entry.start_time);
+        const entryComparisonDate = new Date(entryDate);
+        entryComparisonDate.setHours(0, 0, 0, 0);
+        
+        // Using simple date comparison instead of isSameDay to avoid timezone issues
+        return comparisonDay.getFullYear() === entryComparisonDate.getFullYear() && 
+               comparisonDay.getMonth() === entryComparisonDate.getMonth() && 
+               comparisonDay.getDate() === entryComparisonDate.getDate();
+      } catch (e) {
+        console.error("Error parsing date:", entry.start_time, e);
+        return false;
+      }
+    });
+    
+    console.log(`Entries for ${format(day, 'EEE dd')}: `, entriesForDay);
+    
+    // If we have entries but they might not be visible, log a warning
+    if (entriesForDay.length > 0) {
+      console.log(`Found ${entriesForDay.length} entries for ${format(day, 'EEE dd')}`);
+    }
+    
+    // Map to display format
+    return entriesForDay.map(entry => {
       const hours = Math.floor(entry.duration / 3600);
       const minutes = Math.floor((entry.duration % 3600) / 60);
       const durationFormatted = `${hours}h ${minutes}m`;
+      
+      // Get color from project or use default
+      const bgColor = projectColors[entry.project_id || 'default'];
       
       return {
         id: entry.id,
         title: entry.description,
         project: entry.project_name || 'No Project',
         duration: durationFormatted,
-        color: projectColors[entry.project_id || 'default']
+        color: bgColor
       };
     });
   };
@@ -353,41 +389,10 @@ const CalendarPage = () => {
       
       setIsDialogOpen(false);
       
-      // Update cache with the new entry
-      if (timeEntriesCache) {
-        const newEntryDateISO = newEntryDate.toISOString();
-        const cacheStartISO = timeEntriesCache.startDate;
-        const cacheEndISO = timeEntriesCache.endDate;
-        
-        // Only update cache if the new entry falls within the current date range
-        if (newEntryDateISO >= cacheStartISO && newEntryDateISO <= cacheEndISO) {
-          // Generate a temporary ID for the new entry
-          const tempId = `temp-${Date.now()}`;
-          
-          // Get project name from cache
-          const projectName = newEntry.project_id ? 
-            projectsCache?.find(p => p.id === newEntry.project_id)?.name : undefined;
-          
-          // Add the new entry to the cache
-          const newCacheEntry: TimeEntry = {
-            id: tempId,
-            description: newEntry.title,
-            duration: durationSeconds,
-            start_time: newEntryDateISO,
-            project_id: newEntry.project_id || null,
-            project_name: projectName
-          };
-          
-          timeEntriesCache.entries = [newCacheEntry, ...timeEntriesCache.entries];
-          setTimeEntries([...timeEntriesCache.entries]);
-        } else {
-          // If the entry is outside the current date range, invalidate cache
-          timeEntriesCache = null;
-          fetchTimeEntries();
-        }
-      } else {
-        fetchTimeEntries();
-      }
+      // Force a full refresh of time entries instead of just relying on cache updates
+      // This ensures any newly added entry will show up properly
+      timeEntriesCache = null;
+      fetchTimeEntries();
       
     } catch (error: unknown) {
       const pgError = error as PostgrestError;
@@ -493,6 +498,14 @@ const CalendarPage = () => {
                   </Select>
                 </div>
                 
+                <div className="grid gap-2">
+                  <label htmlFor="date" className="text-sm font-medium">Date</label>
+                  <div className="flex items-center p-2 rounded-md border">
+                    <CalendarIcon className="mr-2 h-4 w-4 text-muted-foreground" />
+                    <span>{format(newEntry.date, 'EEEE, MMMM d, yyyy')}</span>
+                  </div>
+                </div>
+                
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
                     <label htmlFor="hours" className="text-sm font-medium">Hours</label>
@@ -585,26 +598,39 @@ const CalendarPage = () => {
                     </div>
                   ) : (
                     <>
-                      {getEntriesForDay(day).map(entry => (
-                        <div 
-                          key={entry.id} 
-                          className={`p-2 rounded-md ${entry.color} text-white cursor-pointer hover:opacity-90 transition-opacity`}
-                        >
-                          <div className="font-medium text-sm">{entry.title}</div>
-                          <div className="text-xs flex justify-between">
-                            <span>{entry.project}</span>
-                            <span>{entry.duration}</span>
+                      {getEntriesForDay(day).map(entry => {
+                        console.log(`Rendering entry for ${format(day, 'EEE dd')}:`, entry);
+                        return (
+                          <div 
+                            key={entry.id} 
+                            className={`p-2 rounded-md ${entry.color} cursor-pointer hover:opacity-90 transition-opacity shadow-sm font-medium mb-1`}
+                          >
+                            <div className="text-sm">{entry.title}</div>
+                            <div className="text-xs flex justify-between">
+                              <span className="truncate mr-1">{entry.project}</span>
+                              <span className="whitespace-nowrap">{entry.duration}</span>
+                            </div>
                           </div>
+                        );
+                      })}
+                      
+                      {/* Show a message if entries exist but might have visibility issues */}
+                      {getEntriesForDay(day).length > 0 && getEntriesForDay(day).length === 0 && (
+                        <div className="p-2 rounded-md bg-yellow-100 text-yellow-800 text-xs">
+                          {getEntriesForDay(day).length} entries found but may have display issues
                         </div>
-                      ))}
+                      )}
                       
                       {!isLoading && getEntriesForDay(day).length === 0 && (
                         <button
                           className="w-full p-2 rounded-md border border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground"
                           onClick={() => {
+                            // Create a new date object to avoid reference issues
+                            const selectedDate = new Date(day.getTime());
+                            console.log("Selected date for new entry:", format(selectedDate, 'yyyy-MM-dd'));
                             setNewEntry(prev => ({
                               ...prev,
-                              date: day
+                              date: selectedDate
                             }));
                             setIsDialogOpen(true);
                           }}
