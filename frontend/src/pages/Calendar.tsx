@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { 
   Calendar as CalendarIcon, 
@@ -31,22 +30,32 @@ import { format, addDays, startOfWeek, endOfWeek, eachDayOfInterval, isToday, is
 import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthContext';
+import { PostgrestError } from '@supabase/supabase-js';
 
 interface TimeEntry {
   id: string;
-  title: string;
-  project: string;
-  project_id: string;
-  start: Date;
-  duration: string;
-  color: string;
   description: string;
+  duration: number;
+  start_time: string;
+  project_id: string | null;
+  project_name?: string;
 }
 
 interface Project {
   id: string;
   name: string;
 }
+
+interface DisplayEntry {
+  id: string;
+  title: string;
+  project: string;
+  duration: string;
+  color: string;
+}
+
+// Add a delay helper function at the top of the file
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const CalendarPage = () => {
   const { user } = useAuth();
@@ -57,6 +66,7 @@ const CalendarPage = () => {
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [newEntry, setNewEntry] = useState({
     title: '',
     project_id: '',
@@ -75,27 +85,136 @@ const CalendarPage = () => {
     'default': 'bg-blue-500',
   };
   
+  const fetchTimeEntries = async () => {
+    if (!user) return;
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      // Retry logic for fetching time entries
+      let timeEntriesData = null;
+      let timeEntriesError = null;
+      let projectsData = null;
+      let projectsError = null;
+      
+      // Try up to 3 times with increasing delays
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) {
+          // Wait before retrying - 1s, then 2s, then 3s
+          await delay(attempt * 1000);
+          console.log(`Retry attempt ${attempt + 1} for fetching data...`);
+        }
+        
+        try {
+          const startISO = startDate.toISOString();
+          const endISO = endDate.toISOString();
+          
+          // Use simpler query with fewer columns to reduce payload size
+          const entriesResponse = await supabase
+            .from('time_entries')
+            .select('id, description, duration, start_time, project_id')
+            .eq('user_id', user.id)
+            .gte('start_time', startISO)
+            .lte('start_time', endISO);
+          
+          if (!entriesResponse.error) {
+            timeEntriesData = entriesResponse.data;
+            timeEntriesError = null;
+            
+            // Add small delay between requests to avoid overwhelming the connection
+            await delay(300);
+            
+            const projectsResponse = await supabase
+              .from('projects')
+              .select('id, name')
+              .eq('user_id', user.id);
+            
+            if (!projectsResponse.error) {
+              projectsData = projectsResponse.data;
+              projectsError = null;
+              break; // Both requests successful, exit retry loop
+            } else {
+              projectsError = projectsResponse.error;
+            }
+          } else {
+            timeEntriesError = entriesResponse.error;
+          }
+        } catch (e) {
+          console.error("Network error during fetch attempt:", e);
+        }
+      }
+      
+      // Check for errors after all retry attempts
+      if (timeEntriesError) throw timeEntriesError;
+      if (projectsError) throw projectsError;
+      
+      // Create a map of project IDs to names
+      const projectNameMap = new Map(projectsData?.map(p => [p.id, p.name]) || []);
+      
+      // Combine the data
+      const entriesWithProjects = timeEntriesData?.map(entry => ({
+        ...entry,
+        project_name: entry.project_id ? projectNameMap.get(entry.project_id) : undefined
+      })) || [];
+      
+      setTimeEntries(entriesWithProjects);
+      
+    } catch (error: unknown) {
+      const pgError = error as PostgrestError;
+      console.error("Error fetching time entries:", pgError);
+      setError(pgError.message || "Could not load your time entries due to a server error.");
+      toast({
+        title: "Error loading calendar",
+        description: pgError.message || "Could not load your time entries. Please try again later.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
   useEffect(() => {
     const fetchProjects = async () => {
       if (!user) return;
       
-      try {
-        const { data, error } = await supabase
-          .from('projects')
-          .select('id, name')
-          .eq('user_id', user.id);
+      // Retry logic for projects
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) {
+          await delay(attempt * 1000);
+          console.log(`Retry attempt ${attempt + 1} for fetching projects...`);
+        }
+        
+        try {
+          const { data, error } = await supabase
+            .from('projects')
+            .select('id, name')
+            .eq('user_id', user.id);
+            
+          if (error) throw error;
           
-        if (error) throw error;
-        
-        setProjects(data || []);
-        
-        // Setup project colors
-        data?.forEach((project, index) => {
+          setProjects(data || []);
+          
+          // Setup project colors
           const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500'];
-          projectColors[project.id] = colors[index % colors.length];
-        });
-      } catch (error) {
-        console.error("Error fetching projects:", error);
+          data?.forEach((project, index) => {
+            projectColors[project.id] = colors[index % colors.length];
+          });
+          
+          return; // Success, exit retry loop
+        } catch (error: unknown) {
+          const pgError = error as PostgrestError;
+          console.error(`Error fetching projects (attempt ${attempt + 1}):`, pgError);
+          
+          if (attempt === 2) { // Last attempt
+            setError(pgError.message || "Could not load projects due to a server error.");
+            toast({
+              title: "Error fetching projects",
+              description: pgError.message || "Could not load your projects. Please try again later.",
+              variant: "destructive"
+            });
+          }
+        }
       }
     };
     
@@ -103,75 +222,26 @@ const CalendarPage = () => {
   }, [user]);
   
   useEffect(() => {
-    const fetchTimeEntries = async () => {
-      if (!user) return;
-      
-      setIsLoading(true);
-      
-      try {
-        // Get start and end of the displayed week in ISO format
-        const startISO = startDate.toISOString();
-        const endISO = endDate.toISOString();
-        
-        const { data: entriesData, error: entriesError } = await supabase
-          .from('time_entries')
-          .select(`
-            id, 
-            description, 
-            duration, 
-            start_time, 
-            project_id,
-            projects(name)
-          `)
-          .eq('user_id', user.id)
-          .gte('start_time', startISO)
-          .lte('start_time', endISO);
-          
-        if (entriesError) throw entriesError;
-        
-        // Transform the data
-        const formattedEntries = entriesData?.map(entry => {
-          // Format duration as hours and minutes
-          const hours = Math.floor(entry.duration / 3600);
-          const minutes = Math.floor((entry.duration % 3600) / 60);
-          const durationFormatted = `${hours}h ${minutes}m`;
-          
-          // Get project name
-          const projectName = entry.projects?.name || 'No Project';
-          
-          // Get project color or use default
-          const color = projectColors[entry.project_id || 'default'] || 'bg-blue-500';
-          
-          return {
-            id: entry.id,
-            title: entry.description,
-            description: entry.description,
-            project: projectName,
-            project_id: entry.project_id,
-            start: parseISO(entry.start_time),
-            duration: durationFormatted,
-            color
-          };
-        }) || [];
-        
-        setTimeEntries(formattedEntries);
-      } catch (error) {
-        console.error("Error fetching time entries:", error);
-        toast({
-          title: "Error loading calendar",
-          description: "Could not load your time entries. Please try again later.",
-          variant: "destructive"
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
     fetchTimeEntries();
-  }, [user, startDate, endDate, toast]);
+  }, [user, startDate, endDate]);
   
   const getEntriesForDay = (day: Date) => {
-    return timeEntries.filter(entry => isSameDay(entry.start, day));
+    return timeEntries.filter(entry => {
+      const entryDate = parseISO(entry.start_time);
+      return isSameDay(entryDate, day);
+    }).map(entry => {
+      const hours = Math.floor(entry.duration / 3600);
+      const minutes = Math.floor((entry.duration % 3600) / 60);
+      const durationFormatted = `${hours}h ${minutes}m`;
+      
+      return {
+        id: entry.id,
+        title: entry.description,
+        project: entry.project_name || 'No Project',
+        duration: durationFormatted,
+        color: projectColors[entry.project_id || 'default']
+      };
+    });
   };
   
   const goToPreviousWeek = () => {
@@ -184,35 +254,6 @@ const CalendarPage = () => {
   
   const goToToday = () => {
     setCurrentDate(new Date());
-  };
-  
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setNewEntry(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-  
-  const handleProjectChange = (value: string) => {
-    setNewEntry(prev => ({
-      ...prev,
-      project_id: value
-    }));
-  };
-  
-  const handleDateChange = (date: Date) => {
-    setNewEntry(prev => ({
-      ...prev,
-      date
-    }));
-  };
-  
-  const handleBillableChange = (checked: boolean) => {
-    setNewEntry(prev => ({
-      ...prev,
-      billable: checked
-    }));
   };
   
   const handleAddEntry = async () => {
@@ -229,7 +270,6 @@ const CalendarPage = () => {
     try {
       setIsLoading(true);
       
-      // Parse hours and minutes to seconds
       const hours = parseInt(newEntry.hours) || 0;
       const minutes = parseInt(newEntry.minutes) || 0;
       const durationSeconds = (hours * 3600) + (minutes * 60);
@@ -243,11 +283,8 @@ const CalendarPage = () => {
         return;
       }
       
-      // Set the time of the date object to noon to avoid timezone issues
       const startDate = new Date(newEntry.date);
       startDate.setHours(12, 0, 0, 0);
-      
-      // Calculate end time
       const endDate = new Date(startDate.getTime() + (durationSeconds * 1000));
       
       const { error } = await supabase
@@ -268,7 +305,6 @@ const CalendarPage = () => {
         description: "Your time entry has been added successfully."
       });
       
-      // Reset form and reload entries
       setNewEntry({
         title: '',
         project_id: '',
@@ -279,57 +315,34 @@ const CalendarPage = () => {
       });
       
       setIsDialogOpen(false);
+      fetchTimeEntries();
       
-      // Refresh entries
-      const { data: entriesData, error: entriesError } = await supabase
-        .from('time_entries')
-        .select(`
-          id, 
-          description, 
-          duration, 
-          start_time, 
-          project_id,
-          projects(name)
-        `)
-        .eq('user_id', user.id)
-        .gte('start_time', startDate.toISOString())
-        .lte('start_time', endDate.toISOString());
-        
-      if (entriesError) throw entriesError;
-      
-      // Transform the data
-      const formattedEntries = entriesData?.map(entry => {
-        const hours = Math.floor(entry.duration / 3600);
-        const minutes = Math.floor((entry.duration % 3600) / 60);
-        const durationFormatted = `${hours}h ${minutes}m`;
-        
-        const projectName = entry.projects?.name || 'No Project';
-        const color = projectColors[entry.project_id || 'default'] || 'bg-blue-500';
-        
-        return {
-          id: entry.id,
-          title: entry.description,
-          description: entry.description,
-          project: projectName,
-          project_id: entry.project_id,
-          start: parseISO(entry.start_time),
-          duration: durationFormatted,
-          color
-        };
-      }) || [];
-      
-      setTimeEntries(formattedEntries);
-      
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const pgError = error as PostgrestError;
       toast({
         title: "Error adding entry",
-        description: error.message || "Could not add your time entry. Please try again.",
+        description: pgError.message || "Could not add your time entry. Please try again.",
         variant: "destructive"
       });
     } finally {
       setIsLoading(false);
     }
   };
+  
+  if (error) {
+    return (
+      <DashboardLayout title="Calendar">
+        <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
+          <div className="text-destructive mb-4">
+            <CalendarIcon className="h-12 w-12 mx-auto mb-4" />
+            <h3 className="text-lg font-medium">Error loading calendar</h3>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()}>Try Again</Button>
+        </div>
+      </DashboardLayout>
+    );
+  }
   
   return (
     <DashboardLayout title="Calendar">
@@ -384,36 +397,30 @@ const CalendarPage = () => {
                     id="title" 
                     name="title"
                     value={newEntry.title}
-                    onChange={handleInputChange}
+                    onChange={(e) => setNewEntry(prev => ({ ...prev, title: e.target.value }))}
                     placeholder="What are you working on?" 
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <label htmlFor="project" className="text-sm font-medium">Project</label>
-                    <Select value={newEntry.project_id} onValueChange={handleProjectChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select project" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {projects.map(project => (
-                          <SelectItem key={project.id} value={project.id}>
-                            {project.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <label htmlFor="date" className="text-sm font-medium">Date</label>
-                    <div className="flex">
-                      <Button variant="outline" className="w-full justify-start text-left font-normal">
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        <span>{format(newEntry.date, 'MMM dd, yyyy')}</span>
-                      </Button>
-                    </div>
-                  </div>
+                
+                <div className="grid gap-2">
+                  <label htmlFor="project" className="text-sm font-medium">Project</label>
+                  <Select 
+                    value={newEntry.project_id} 
+                    onValueChange={(value) => setNewEntry(prev => ({ ...prev, project_id: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {projects.map(project => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+                
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
                     <label htmlFor="hours" className="text-sm font-medium">Hours</label>
@@ -421,7 +428,7 @@ const CalendarPage = () => {
                       id="hours" 
                       name="hours"
                       value={newEntry.hours}
-                      onChange={handleInputChange}
+                      onChange={(e) => setNewEntry(prev => ({ ...prev, hours: e.target.value }))}
                       placeholder="0" 
                       type="number"
                       min="0"
@@ -434,7 +441,7 @@ const CalendarPage = () => {
                       id="minutes" 
                       name="minutes"
                       value={newEntry.minutes}
-                      onChange={handleInputChange}
+                      onChange={(e) => setNewEntry(prev => ({ ...prev, minutes: e.target.value }))}
                       placeholder="0" 
                       type="number"
                       min="0"
@@ -442,11 +449,14 @@ const CalendarPage = () => {
                     />
                   </div>
                 </div>
-                <div className="flex items-center space-x-2 mt-2">
+                
+                <div className="flex items-center space-x-2">
                   <Checkbox 
                     id="billable" 
                     checked={newEntry.billable}
-                    onCheckedChange={handleBillableChange}
+                    onCheckedChange={(checked) => 
+                      setNewEntry(prev => ({ ...prev, billable: checked as boolean }))
+                    }
                   />
                   <label
                     htmlFor="billable"
@@ -469,72 +479,54 @@ const CalendarPage = () => {
         </div>
       </div>
       
-      <Tabs defaultValue="calendar">
-        <TabsList className="mb-6">
-          <TabsTrigger value="calendar">
-            <CalendarIcon className="mr-2 h-4 w-4" />
-            Calendar
-          </TabsTrigger>
-          <TabsTrigger value="timeline">
-            <Clock className="mr-2 h-4 w-4" />
-            Timeline
-          </TabsTrigger>
-          <TabsTrigger value="projects">
-            <Layers className="mr-2 h-4 w-4" />
-            Projects
-          </TabsTrigger>
-          <TabsTrigger value="team">
-            <Users className="mr-2 h-4 w-4" />
-            Team
-          </TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="calendar">
-          <Card>
-            <CardContent className="p-0">
-              <div className="grid grid-cols-7 border-b">
-                {days.map((day, index) => (
-                  <div 
-                    key={index} 
-                    className={`p-3 text-center border-r last:border-r-0 ${
-                      isToday(day) ? 'bg-primary/10 font-medium' : ''
-                    }`}
-                  >
-                    <div className="text-sm font-medium">{format(day, 'EEE')}</div>
-                    <div className={`text-lg ${isToday(day) ? 'text-primary' : ''}`}>
-                      {format(day, 'd')}
-                    </div>
-                  </div>
-                ))}
+      <Card>
+        <CardContent className="p-0">
+          <div className="grid grid-cols-7 border-b">
+            {days.map((day, index) => (
+              <div 
+                key={index} 
+                className={`p-3 text-center border-r last:border-r-0 ${
+                  isToday(day) ? 'bg-primary/10 font-medium' : ''
+                }`}
+              >
+                <div className="text-sm font-medium">{format(day, 'EEE')}</div>
+                <div className={`text-lg ${isToday(day) ? 'text-primary' : ''}`}>
+                  {format(day, 'd')}
+                </div>
               </div>
-              
-              <div className="grid grid-cols-7 min-h-[600px]">
-                {days.map((day, dayIndex) => (
-                  <div 
-                    key={dayIndex} 
-                    className={`p-2 border-r last:border-r-0 ${
-                      isToday(day) ? 'bg-primary/5' : ''
-                    }`}
-                  >
-                    <div className="space-y-2">
-                      {isLoading ? (
-                        <div className="p-2 rounded-md bg-muted animate-pulse h-14"></div>
-                      ) : (
-                        getEntriesForDay(day).map(entry => (
-                          <div 
-                            key={entry.id} 
-                            className={`p-2 rounded-md ${entry.color} text-white cursor-pointer hover:opacity-90 transition-opacity`}
-                          >
-                            <div className="font-medium text-sm">{entry.title}</div>
-                            <div className="text-xs flex justify-between">
-                              <span>{entry.project}</span>
-                              <span>{entry.duration}</span>
-                            </div>
+            ))}
+          </div>
+          
+          <div className="grid grid-cols-7 min-h-[600px]">
+            {days.map((day, dayIndex) => (
+              <div 
+                key={dayIndex} 
+                className={`p-2 border-r last:border-r-0 ${
+                  isToday(day) ? 'bg-primary/5' : ''
+                }`}
+              >
+                <div className="space-y-2">
+                  {isLoading ? (
+                    <div className="animate-pulse space-y-2">
+                      <div className="h-14 bg-muted rounded-md"></div>
+                      <div className="h-14 bg-muted rounded-md"></div>
+                    </div>
+                  ) : (
+                    <>
+                      {getEntriesForDay(day).map(entry => (
+                        <div 
+                          key={entry.id} 
+                          className={`p-2 rounded-md ${entry.color} text-white cursor-pointer hover:opacity-90 transition-opacity`}
+                        >
+                          <div className="font-medium text-sm">{entry.title}</div>
+                          <div className="text-xs flex justify-between">
+                            <span>{entry.project}</span>
+                            <span>{entry.duration}</span>
                           </div>
-                        ))
-                      )}
+                        </div>
+                      ))}
                       
-                      {!isLoading && dayIndex <= 4 && getEntriesForDay(day).length === 0 && (
+                      {!isLoading && getEntriesForDay(day).length === 0 && (
                         <button
                           className="w-full p-2 rounded-md border border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground"
                           onClick={() => {
@@ -548,68 +540,14 @@ const CalendarPage = () => {
                           <Plus className="h-4 w-4 mx-auto" />
                         </button>
                       )}
-                    </div>
-                  </div>
-                ))}
+                    </>
+                  )}
+                </div>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="timeline">
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-center py-12">
-                <CalendarIcon className="mx-auto h-12 w-12 text-muted-foreground/50" />
-                <h3 className="mt-4 text-lg font-medium">Timeline View</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  The timeline view allows you to see your time entries in a chronological sequence.
-                </p>
-                <Button className="mt-4">
-                  <Check className="mr-2 h-4 w-4" />
-                  Coming Soon
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="projects">
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-center py-12">
-                <Layers className="mx-auto h-12 w-12 text-muted-foreground/50" />
-                <h3 className="mt-4 text-lg font-medium">Projects View</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  The projects view allows you to organize time entries by project.
-                </p>
-                <Button className="mt-4">
-                  <Check className="mr-2 h-4 w-4" />
-                  Coming Soon
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="team">
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-center py-12">
-                <Users className="mx-auto h-12 w-12 text-muted-foreground/50" />
-                <h3 className="mt-4 text-lg font-medium">Team View</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  The team view allows you to see time entries for all team members.
-                </p>
-                <Button className="mt-4">
-                  <Check className="mr-2 h-4 w-4" />
-                  Coming Soon
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     </DashboardLayout>
   );
 };
