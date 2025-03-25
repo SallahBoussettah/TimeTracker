@@ -1,31 +1,29 @@
 
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Clock, Github, ArrowRight } from 'lucide-react';
+import { Clock, Github } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import { useAuth } from '@/context/AuthContext';
 
 const Login = () => {
-  const navigate = useNavigate();
+  const { user, signIn, isLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   
+  // Redirect if already logged in
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
-      // For now, just navigate to dashboard
-      navigate('/dashboard');
-    }, 1500);
+    await signIn(email, password);
   };
 
   return (
@@ -124,6 +122,7 @@ const Login = () => {
                 type="button" 
                 variant="outline" 
                 className="w-full btn-hover"
+                onClick={() => alert("GitHub auth not implemented yet")}
               >
                 <Github className="mr-2 h-4 w-4" />
                 GitHub

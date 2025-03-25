@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Play, 
   Pause, 
@@ -10,7 +10,8 @@ import {
   Clock, 
   Calendar, 
   Info, 
-  Plus
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,17 +20,105 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { useToast } from '@/components/ui/use-toast';
 import DashboardLayout from '@/components/DashboardLayout';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+
+type TimeEntry = {
+  id: string;
+  description: string;
+  duration: number;
+  start_time: string;
+  end_time: string | null;
+  project_id: string | null;
+};
+
+type Project = {
+  id: string;
+  name: string;
+};
 
 const Timer = () => {
+  const { user } = useAuth();
+  const { toast } = useToast();
   const [isRunning, setIsRunning] = useState(false);
   const [time, setTime] = useState(0);
   const [description, setDescription] = useState('');
   const [editing, setEditing] = useState(false);
-  const [project, setProject] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [tag, setTag] = useState('');
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [activeTab, setActiveTab] = useState('timer');
+  const [todayEntries, setTodayEntries] = useState<TimeEntry[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [startTime, setStartTime] = useState<Date | null>(null);
+  const [timerInterval, setTimerInterval] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    
+    const fetchProjects = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('projects')
+          .select('id, name')
+          .eq('user_id', user.id);
+          
+        if (error) throw error;
+        
+        setProjects(data || []);
+      } catch (error) {
+        console.error("Error fetching projects:", error);
+      }
+    };
+    
+    const fetchTodayEntries = async () => {
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const { data, error } = await supabase
+          .from('time_entries')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('start_time', today.toISOString())
+          .order('start_time', { ascending: false });
+          
+        if (error) throw error;
+        
+        setTodayEntries(data || []);
+      } catch (error) {
+        console.error("Error fetching today's entries:", error);
+      }
+    };
+    
+    fetchProjects();
+    fetchTodayEntries();
+    
+    // Set up real-time subscription
+    const channel = supabase
+      .channel('timer_changes')
+      .on('postgres_changes', 
+        {
+          event: '*',
+          schema: 'public',
+          table: 'time_entries',
+          filter: `user_id=eq.${user.id}`
+        }, 
+        () => {
+          fetchTodayEntries();
+        }
+      )
+      .subscribe();
+      
+    return () => {
+      supabase.removeChannel(channel);
+      if (timerInterval) {
+        clearInterval(timerInterval);
+      }
+    };
+  }, [user]);
 
   const formatTime = (timeInSeconds: number) => {
     const hours = Math.floor(timeInSeconds / 3600);
@@ -44,16 +133,81 @@ const Timer = () => {
   };
 
   const toggleTimer = () => {
+    if (isRunning) {
+      // Pause timer
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        setTimerInterval(null);
+      }
+    } else {
+      // Start timer
+      if (!description.trim()) {
+        toast({
+          title: "Description required",
+          description: "Please enter what you're working on.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      if (!startTime) {
+        setStartTime(new Date());
+      }
+      
+      const interval = window.setInterval(() => {
+        setTime(prevTime => prevTime + 1);
+      }, 1000);
+      
+      setTimerInterval(interval);
+    }
+    
     setIsRunning(!isRunning);
   };
 
-  const stopTimer = () => {
+  const stopTimer = async () => {
+    if (!user || !startTime) return;
+    
+    // Stop timer
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      setTimerInterval(null);
+    }
     setIsRunning(false);
-    // Here we would normally save the time entry
-    setTime(0);
-    setDescription('');
-    setProject('');
-    setTag('');
+    
+    try {
+      const endTime = new Date();
+      
+      const { error } = await supabase
+        .from('time_entries')
+        .insert({
+          user_id: user.id,
+          description: description,
+          duration: time,
+          start_time: startTime.toISOString(),
+          end_time: endTime.toISOString(),
+          project_id: projectId || null
+        });
+        
+      if (error) throw error;
+      
+      toast({
+        title: "Time entry saved",
+        description: `You tracked ${formatTime(time)} for "${description}"`,
+      });
+      
+      // Reset timer
+      setTime(0);
+      setDescription('');
+      setProjectId('');
+      setStartTime(null);
+      
+    } catch (error: any) {
+      toast({
+        title: "Error saving time entry",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
   };
 
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,6 +226,36 @@ const Timer = () => {
     if (e.key === 'Enter') {
       setEditing(false);
     }
+  };
+
+  const deleteTimeEntry = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('time_entries')
+        .delete()
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      setTodayEntries(todayEntries.filter(entry => entry.id !== id));
+      
+      toast({
+        title: "Entry deleted",
+        description: "Time entry has been deleted successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error deleting entry",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const getProjectName = (projectId: string | null) => {
+    if (!projectId) return null;
+    const project = projects.find(p => p.id === projectId);
+    return project ? project.name : null;
   };
 
   return (
@@ -114,15 +298,16 @@ const Timer = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-sm font-medium text-muted-foreground mb-1 block">Project</label>
-                    <Select value={project} onValueChange={setProject}>
+                    <Select value={projectId} onValueChange={setProjectId}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Select project" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="design">UI Design</SelectItem>
-                        <SelectItem value="development">Development</SelectItem>
-                        <SelectItem value="marketing">Marketing</SelectItem>
-                        <SelectItem value="research">Research</SelectItem>
+                        {projects.map(project => (
+                          <SelectItem key={project.id} value={project.id}>
+                            {project.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -177,54 +362,74 @@ const Timer = () => {
             </CardContent>
           </Card>
 
-          {/* Recent Time Entries */}
+          {/* Today's Time Entries */}
           <div>
             <h2 className="text-xl font-semibold mb-4">Today's Entries</h2>
-            <div className="divide-y divide-border space-y-2">
-              <div className="bg-card rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-col">
-                    <h3 className="font-medium">UI Design for TimeTrack</h3>
-                    <div className="flex items-center text-sm text-muted-foreground mt-1 space-x-4">
-                      <span className="flex items-center">
-                        <Folder className="h-3.5 w-3.5 mr-1" />
-                        Design
-                      </span>
-                      <span className="flex items-center">
-                        <Tag className="h-3.5 w-3.5 mr-1" />
-                        Billable
-                      </span>
+            {todayEntries.length > 0 ? (
+              <div className="divide-y divide-border space-y-2">
+                {todayEntries.map(entry => {
+                  const projectName = getProjectName(entry.project_id);
+                  const startDate = new Date(entry.start_time);
+                  const endDate = entry.end_time ? new Date(entry.end_time) : null;
+                  
+                  const formattedStartTime = startDate.toLocaleTimeString([], { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  });
+                  
+                  const formattedEndTime = endDate ? endDate.toLocaleTimeString([], { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  }) : '';
+                  
+                  const formattedTime = endDate 
+                    ? `${formattedStartTime} - ${formattedEndTime}`
+                    : formattedStartTime;
+                  
+                  return (
+                    <div key={entry.id} className="bg-card rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex flex-col">
+                          <h3 className="font-medium">{entry.description}</h3>
+                          <div className="flex items-center text-sm text-muted-foreground mt-1 space-x-4">
+                            {projectName && (
+                              <span className="flex items-center">
+                                <Folder className="h-3.5 w-3.5 mr-1" />
+                                {projectName}
+                              </span>
+                            )}
+                            {tag && (
+                              <span className="flex items-center">
+                                <Tag className="h-3.5 w-3.5 mr-1" />
+                                {tag}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center">
+                          <div className="text-right mr-4">
+                            <div className="font-mono font-medium">{formatTime(entry.duration)}</div>
+                            <div className="text-xs text-muted-foreground mt-1">{formattedTime}</div>
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="icon"
+                            onClick={() => deleteTimeEntry(entry.id)}
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono font-medium">01:45:00</div>
-                    <div className="text-xs text-muted-foreground mt-1">9:00 AM - 10:45 AM</div>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
-              
-              <div className="bg-card rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-col">
-                    <h3 className="font-medium">Client Meeting</h3>
-                    <div className="flex items-center text-sm text-muted-foreground mt-1 space-x-4">
-                      <span className="flex items-center">
-                        <Folder className="h-3.5 w-3.5 mr-1" />
-                        Marketing
-                      </span>
-                      <span className="flex items-center">
-                        <Tag className="h-3.5 w-3.5 mr-1" />
-                        Meeting
-                      </span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono font-medium">00:45:00</div>
-                    <div className="text-xs text-muted-foreground mt-1">11:00 AM - 11:45 AM</div>
-                  </div>
-                </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground bg-card rounded-lg">
+                No time entries yet today. Start tracking your time!
               </div>
-            </div>
+            )}
           </div>
         </div>
         
@@ -335,7 +540,7 @@ const Timer = () => {
             </CardContent>
           </Card>
           
-          <Button className="w-full mt-4">
+          <Button className="w-full mt-4" onClick={() => setActiveTab('timer')}>
             <Plus className="h-4 w-4 mr-2" />
             Add Time Entry
           </Button>

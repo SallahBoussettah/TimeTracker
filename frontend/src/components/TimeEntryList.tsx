@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Edit2, Trash2, Play, MoreVertical } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import {
@@ -8,49 +8,107 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useToast } from '@/components/ui/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/context/AuthContext';
 
-// Mock data for time entries
-const mockTimeEntries = [
-  {
-    id: 1,
-    description: 'Project Research',
-    duration: 4500, // in seconds
-    date: new Date(2023, 6, 19, 10, 30),
-    project: 'Marketing'
-  },
-  {
-    id: 2,
-    description: 'Client Meeting',
-    duration: 3600,
-    date: new Date(2023, 6, 19, 14, 0),
-    project: 'Sales'
-  },
-  {
-    id: 3,
-    description: 'UI Design',
-    duration: 7200,
-    date: new Date(2023, 6, 19, 16, 0),
-    project: 'Design'
-  },
-  {
-    id: 4,
-    description: 'Bug Fixing',
-    duration: 3000,
-    date: new Date(2023, 6, 18, 9, 0),
-    project: 'Development'
-  }
-];
+type TimeEntry = {
+  id: string;
+  description: string;
+  duration: number;
+  start_time: string;
+  end_time: string | null;
+  project_id: string | null;
+};
 
 // Project colors for the badges
 const projectColors: Record<string, string> = {
   Marketing: 'bg-blue-100 text-blue-800',
   Sales: 'bg-green-100 text-green-800',
   Design: 'bg-purple-100 text-purple-800',
-  Development: 'bg-orange-100 text-orange-800'
+  Development: 'bg-orange-100 text-orange-800',
+  default: 'bg-gray-100 text-gray-800'
 };
 
 const TimeEntryList = () => {
-  const [timeEntries, setTimeEntries] = useState(mockTimeEntries);
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [projects, setProjects] = useState<Record<string, {name: string}>>({});
+  
+  useEffect(() => {
+    if (!user) return;
+    
+    const fetchProjects = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('projects')
+          .select('id, name')
+          .eq('user_id', user.id);
+          
+        if (error) throw error;
+        
+        const projectMap: Record<string, {name: string}> = {};
+        data?.forEach(project => {
+          projectMap[project.id] = { name: project.name };
+        });
+        
+        setProjects(projectMap);
+      } catch (error: any) {
+        console.error("Error fetching projects:", error);
+      }
+    };
+    
+    const fetchTimeEntries = async () => {
+      try {
+        setIsLoading(true);
+        
+        const { data, error } = await supabase
+          .from('time_entries')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('start_time', { ascending: false })
+          .limit(10);
+          
+        if (error) throw error;
+        
+        setTimeEntries(data || []);
+      } catch (error: any) {
+        toast({
+          title: "Error loading time entries",
+          description: error.message,
+          variant: "destructive",
+        });
+        console.error("Error fetching time entries:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    // Fetch both projects and time entries
+    Promise.all([fetchProjects(), fetchTimeEntries()]);
+    
+    // Subscribe to real-time changes
+    const channel = supabase
+      .channel('time_entries_changes')
+      .on('postgres_changes', 
+        {
+          event: '*',
+          schema: 'public',
+          table: 'time_entries',
+          filter: `user_id=eq.${user.id}`
+        }, 
+        () => {
+          fetchTimeEntries();
+        }
+      )
+      .subscribe();
+      
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, toast]);
   
   const formatDuration = (durationInSeconds: number) => {
     const hours = Math.floor(durationInSeconds / 3600);
@@ -59,18 +117,55 @@ const TimeEntryList = () => {
     return `${hours}h ${minutes}m`;
   };
   
-  const formatTime = (date: Date) => {
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
   
-  const deleteEntry = (id: number) => {
-    setTimeEntries(timeEntries.filter(entry => entry.id !== id));
+  const deleteEntry = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('time_entries')
+        .delete()
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      setTimeEntries(timeEntries.filter(entry => entry.id !== id));
+      
+      toast({
+        title: "Entry deleted",
+        description: "Time entry has been deleted successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error deleting entry",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
   };
   
-  const continueTiming = (entry: typeof mockTimeEntries[0]) => {
+  const continueTiming = (entry: TimeEntry) => {
     // Implementation would continue timing with the same description and project
     console.log('Continue timing', entry);
   };
+
+  if (isLoading) {
+    return (
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle>Recent Time Entries</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="py-8 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-4 text-muted-foreground">Loading your time entries...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="shadow-sm">
@@ -88,12 +183,16 @@ const TimeEntryList = () => {
               <div className="flex-1">
                 <div className="flex items-center">
                   <h4 className="font-medium">{entry.description}</h4>
-                  <span className={`ml-3 px-2 py-0.5 rounded-full text-xs font-medium ${projectColors[entry.project]}`}>
-                    {entry.project}
-                  </span>
+                  {entry.project_id && projects[entry.project_id] && (
+                    <span className={`ml-3 px-2 py-0.5 rounded-full text-xs font-medium ${
+                      projectColors[projects[entry.project_id].name as keyof typeof projectColors] || projectColors.default
+                    }`}>
+                      {projects[entry.project_id].name}
+                    </span>
+                  )}
                 </div>
                 <div className="text-sm text-muted-foreground mt-1">
-                  {entry.date.toLocaleDateString()} • {formatTime(entry.date)}
+                  {new Date(entry.start_time).toLocaleDateString()} • {formatTime(entry.start_time)}
                 </div>
               </div>
               

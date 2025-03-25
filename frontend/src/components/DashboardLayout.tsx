@@ -1,5 +1,4 @@
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Clock, 
@@ -27,6 +26,8 @@ import {
   DialogFooter
 } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/context/AuthContext';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -37,9 +38,53 @@ const DashboardLayout = ({ children, title }: DashboardLayoutProps) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [profileData, setProfileData] = useState<{name?: string, avatar_url?: string} | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, signOut } = useAuth();
+  
+  useEffect(() => {
+    const fetchProfileData = async () => {
+      if (!user) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('name, avatar_url')
+          .eq('id', user.id)
+          .single();
+          
+        if (error) throw error;
+        
+        setProfileData(data);
+      } catch (error) {
+        console.error("Error fetching profile data:", error);
+      }
+    };
+    
+    fetchProfileData();
+    
+    // Set up subscription to profile changes
+    const channel = supabase
+      .channel('profile_updates')
+      .on('postgres_changes', 
+        { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'profiles',
+          filter: `id=eq.${user?.id}`
+        }, 
+        () => {
+          fetchProfileData();
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
   
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
@@ -53,7 +98,8 @@ const DashboardLayout = ({ children, title }: DashboardLayoutProps) => {
     setProfileOpen(!profileOpen);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut();
     toast({
       title: "Logged out successfully",
       description: "You have been logged out of your account.",
@@ -62,6 +108,21 @@ const DashboardLayout = ({ children, title }: DashboardLayoutProps) => {
   };
 
   const isActive = (path: string) => location.pathname === path;
+  
+  const getUserInitials = () => {
+    if (!user) return '?';
+    
+    if (profileData?.name) {
+      const names = profileData.name.split(' ');
+      if (names.length >= 2) {
+        return `${names[0][0]}${names[1][0]}`.toUpperCase();
+      }
+      return names[0][0].toUpperCase();
+    }
+    
+    // Use email if name is not available
+    return user.email ? user.email[0].toUpperCase() : '?';
+  };
 
   return (
     <div className="min-h-screen flex bg-secondary/30">
@@ -226,8 +287,8 @@ const DashboardLayout = ({ children, title }: DashboardLayoutProps) => {
                 <button className="flex items-center rounded-full">
                   <span className="sr-only">User menu</span>
                   <Avatar>
-                    <AvatarImage src="https://github.com/shadcn.png" alt="User" />
-                    <AvatarFallback>JD</AvatarFallback>
+                    <AvatarImage src={profileData?.avatar_url || ''} alt={profileData?.name || 'User'} />
+                    <AvatarFallback>{getUserInitials()}</AvatarFallback>
                   </Avatar>
                 </button>
               </DialogTrigger>
@@ -267,7 +328,7 @@ const DashboardLayout = ({ children, title }: DashboardLayoutProps) => {
                 <div className="mt-3 sm:mt-0">
                   <Link to="/new-project">
                     <Button className="btn-hover flex">
-                      <Zap className="mr-1.5 h-4 w-4" />
+                      <Plus className="mr-1.5 h-4 w-4" />
                       New Project
                     </Button>
                   </Link>

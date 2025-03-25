@@ -1,298 +1,160 @@
+
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Layers, 
-  Plus, 
-  Users, 
-  Calendar as CalendarIcon, 
-  Clock, 
-  Tag, 
-  FileText, 
-  CheckCircle, 
-  X 
-} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { format } from 'date-fns';
 import { useToast } from '@/components/ui/use-toast';
 import DashboardLayout from '@/components/DashboardLayout';
-
-const projectTemplates = [
-  {
-    id: 'blank',
-    name: 'Blank Project',
-    description: 'Start from scratch with an empty project.',
-    icon: Layers
-  },
-  {
-    id: 'web-design',
-    name: 'Web Design',
-    description: 'Template for web design projects with standard milestones.',
-    icon: FileText
-  },
-  {
-    id: 'software-dev',
-    name: 'Software Development',
-    description: 'Template for software development with agile sprints.',
-    icon: CheckCircle
-  }
-];
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/context/AuthContext';
 
 const NewProject = () => {
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const { toast } = useToast();
-  const [step, setStep] = useState(1);
-  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState('');
-  const [projectDescription, setProjectDescription] = useState('');
-  const [client, setClient] = useState('');
-  const [startDate, setStartDate] = useState<Date | undefined>(new Date());
-  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
-  const [isStartDateOpen, setIsStartDateOpen] = useState(false);
-  const [isEndDateOpen, setIsEndDateOpen] = useState(false);
-  const [projectType, setProjectType] = useState('');
-  const [budget, setBudget] = useState('');
-  const [budgetType, setBudgetType] = useState('fixed');
-  
-  const handleTemplateSelect = (templateId: string) => {
-    setSelectedTemplate(templateId);
-    setStep(2);
+  const navigate = useNavigate();
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    client: ''
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
-  
-  const handleBack = () => {
-    setStep(1);
-  };
-  
-  const handleSubmit = (e: React.FormEvent) => {
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Here you would normally send the data to your backend
-    toast({
-      title: "Project created successfully",
-      description: `${projectName} has been created.`,
-    });
+    if (!user) {
+      toast({
+        title: "Authentication error",
+        description: "You must be logged in to create a project.",
+        variant: "destructive",
+      });
+      return;
+    }
     
-    // Navigate back to dashboard
-    navigate('/dashboard');
+    if (!formData.name.trim()) {
+      toast({
+        title: "Validation error",
+        description: "Project name is required.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setIsSubmitting(true);
+    
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .insert({
+          name: formData.name,
+          description: formData.description,
+          client: formData.client,
+          user_id: user.id
+        });
+      
+      if (error) throw error;
+      
+      toast({
+        title: "Project created",
+        description: `${formData.name} has been created successfully.`,
+      });
+      
+      navigate('/dashboard');
+      
+    } catch (error: any) {
+      toast({
+        title: "Error creating project",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
-  
+
   return (
     <DashboardLayout title="Create New Project">
-      {step === 1 ? (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {projectTemplates.map((template) => (
-              <Card 
-                key={template.id}
-                className="cursor-pointer hover:border-primary/50 transition-all"
-                onClick={() => handleTemplateSelect(template.id)}
-              >
-                <CardContent className="p-6 flex flex-col items-center text-center">
-                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                    <template.icon className="h-6 w-6 text-primary" />
-                  </div>
-                  <h3 className="text-lg font-medium mb-2">{template.name}</h3>
-                  <p className="text-sm text-muted-foreground">{template.description}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-8">
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="space-y-4">
+      <div className="max-w-2xl mx-auto">
+        <Card>
+          <form onSubmit={handleSubmit}>
+            <CardHeader>
+              <CardTitle>New Project</CardTitle>
+              <CardDescription>
+                Create a new project to organize your time entries.
+              </CardDescription>
+            </CardHeader>
+            
+            <CardContent className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="project-name">Project Name</Label>
-                <Input 
-                  id="project-name" 
-                  placeholder="Enter project name" 
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
+                <Label htmlFor="name">Project Name</Label>
+                <Input
+                  id="name"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleChange}
+                  placeholder="Enter project name"
                   required
                 />
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="project-description">Description</Label>
-                <Textarea 
-                  id="project-description" 
-                  placeholder="Enter a description for your project" 
-                  value={projectDescription}
-                  onChange={(e) => setProjectDescription(e.target.value)}
-                  className="min-h-[100px]"
+                <Label htmlFor="client">Client (Optional)</Label>
+                <Input
+                  id="client"
+                  name="client"
+                  value={formData.client}
+                  onChange={handleChange}
+                  placeholder="Enter client name"
                 />
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="client">Client</Label>
-                <Select value={client} onValueChange={setClient}>
-                  <SelectTrigger id="client">
-                    <SelectValue placeholder="Select client" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="internal">Internal</SelectItem>
-                    <SelectItem value="acme">Acme Corp</SelectItem>
-                    <SelectItem value="globex">Globex</SelectItem>
-                    <SelectItem value="stark">Stark Industries</SelectItem>
-                    <SelectItem value="wayne">Wayne Enterprises</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="description">Description (Optional)</Label>
+                <Textarea
+                  id="description"
+                  name="description"
+                  value={formData.description}
+                  onChange={handleChange}
+                  placeholder="Enter project description"
+                  rows={4}
+                />
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="start-date">Start Date</Label>
-                  <Popover open={isStartDateOpen} onOpenChange={setIsStartDateOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="w-full justify-start text-left font-normal"
-                        id="start-date"
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {startDate ? format(startDate, 'PPP') : <span>Pick a date</span>}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={startDate}
-                        onSelect={(date) => {
-                          setStartDate(date);
-                          setIsStartDateOpen(false);
-                        }}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="end-date">End Date</Label>
-                  <Popover open={isEndDateOpen} onOpenChange={setIsEndDateOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="w-full justify-start text-left font-normal"
-                        id="end-date"
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {endDate ? format(endDate, 'PPP') : <span>Pick a date</span>}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={endDate}
-                        onSelect={(date) => {
-                          setEndDate(date);
-                          setIsEndDateOpen(false);
-                        }}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-            </div>
+            </CardContent>
             
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="project-type">Project Type</Label>
-                <Select value={projectType} onValueChange={setProjectType}>
-                  <SelectTrigger id="project-type">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="development">Software Development</SelectItem>
-                    <SelectItem value="design">Design</SelectItem>
-                    <SelectItem value="marketing">Marketing</SelectItem>
-                    <SelectItem value="consulting">Consulting</SelectItem>
-                    <SelectItem value="research">Research</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <CardFooter className="flex justify-between">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => navigate('/dashboard')}
+              >
+                Cancel
+              </Button>
               
-              <div className="space-y-2">
-                <Label htmlFor="budget-type">Budget Type</Label>
-                <Select value={budgetType} onValueChange={setBudgetType}>
-                  <SelectTrigger id="budget-type">
-                    <SelectValue placeholder="Select budget type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="fixed">Fixed Budget</SelectItem>
-                    <SelectItem value="hourly">Hourly Rate</SelectItem>
-                    <SelectItem value="non-billable">Non-billable</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="budget">Budget</Label>
-                <div className="flex">
-                  <div className="bg-muted flex items-center px-3 rounded-l-md border border-r-0 border-input">
-                    <span className="text-sm text-muted-foreground">$</span>
-                  </div>
-                  <Input 
-                    id="budget" 
-                    type="number" 
-                    placeholder="Enter amount" 
-                    value={budget}
-                    onChange={(e) => setBudget(e.target.value)}
-                    className="rounded-l-none"
-                  />
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <Label>Team Members</Label>
-                <div className="flex flex-wrap gap-2">
-                  <div className="flex items-center p-1 bg-muted rounded-full">
-                    <div className="h-6 w-6 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium">JD</div>
-                    <span className="text-xs px-2">You</span>
-                  </div>
-                  <Button variant="outline" size="sm" className="rounded-full h-8">
-                    <Plus className="h-3.5 w-3.5 mr-1" />
-                    Add Member
-                  </Button>
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <Label>Tags</Label>
-                <div className="flex flex-wrap gap-2">
-                  <div className="flex items-center p-1 bg-primary/10 rounded-md">
-                    <span className="text-xs px-1">High Priority</span>
-                    <button className="ml-1 text-muted-foreground hover:text-foreground">
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                  <Button variant="outline" size="sm" className="h-8">
-                    <Tag className="h-3.5 w-3.5 mr-1" />
-                    Add Tag
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex justify-between">
-            <Button type="button" variant="outline" onClick={handleBack}>
-              Back
-            </Button>
-            <Button type="submit">
-              Create Project
-            </Button>
-          </div>
-        </form>
-      )}
+              <Button 
+                type="submit" 
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <>
+                    <span className="animate-spin mr-2">⊚</span> 
+                    Creating...
+                  </>
+                ) : (
+                  'Create Project'
+                )}
+              </Button>
+            </CardFooter>
+          </form>
+        </Card>
+      </div>
     </DashboardLayout>
   );
 };
