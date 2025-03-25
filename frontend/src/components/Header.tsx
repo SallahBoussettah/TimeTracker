@@ -80,7 +80,7 @@ const Header = () => {
   };
 
   return (
-    <header className="w-full py-4 px-4 sm:px-6 lg:px-8 border-b border-border/40 glass fixed top-0 z-50">
+    <header className="w-full py-4 px-4 sm:px-6 lg:px-8 border-b border-border/40 bg-card/80 backdrop-blur-sm fixed top-0 z-50">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <Link to="/" className="flex items-center space-x-2">
           <Clock className="h-6 w-6 text-primary" />
@@ -178,7 +178,7 @@ const Header = () => {
       
       {/* Mobile menu */}
       {isMenuOpen && (
-        <div className="md:hidden absolute top-16 inset-x-0 p-4 glass-dark animate-fade-in border-t border-b border-border/40">
+        <div className="md:hidden absolute top-16 inset-x-0 p-4 bg-card/95 backdrop-blur-md animate-fade-in border-t border-b border-border/40">
           <nav className="flex flex-col space-y-4 py-4">
             <Link 
               to="/" 

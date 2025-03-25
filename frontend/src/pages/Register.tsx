@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
+import { Clock, Github } from 'lucide-react';
+import Header from '@/components/Header';
+import Footer from '@/components/Footer';
 import { useAuth } from '@/context/AuthContext';
 
 const Register = () => {
@@ -48,10 +52,11 @@ const Register = () => {
       });
       
       navigate("/login");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Something went wrong. Please try again.";
       toast({
         title: "Registration failed",
-        description: error.message || "Something went wrong. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -60,116 +65,138 @@ const Register = () => {
   };
 
   return (
-    <div className="container relative h-[calc(100vh-80px)] flex items-center justify-center">
-      <div className="max-w-md w-full p-6 space-y-8">
-        <div className="text-center">
-          <h2 className="mt-6 text-3xl font-bold text-gray-900">
-            Create an account
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Already have an account?{' '}
-            <Link to="/login" className="font-medium text-primary hover:underline">
-              Sign in
-            </Link>
-          </p>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <input type="hidden" name="remember" value="true" />
-          <div className="rounded-md shadow-sm space-y-4">
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                Full Name
-              </label>
-              <div className="mt-1">
+    <div className="min-h-screen flex flex-col">
+      <Header />
+      
+      <main className="flex-grow flex items-center justify-center py-16 px-4 sm:px-6 lg:px-8 animated-gradient mt-16">
+        <div className="w-full max-w-md">
+          <div className="bg-card/90 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-border/20 animate-scale-in">
+            <div className="text-center mb-8">
+              <div className="flex justify-center mb-4">
+                <Clock className="h-10 w-10 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold tracking-tight">Create an account</h2>
+              <p className="text-sm text-muted-foreground mt-2">
+                Get started with your free account today
+              </p>
+            </div>
+            
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name</Label>
                 <Input
                   id="name"
                   name="name"
                   type="text"
-                  required
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
-                  placeholder="Enter your full name"
+                  placeholder="John Doe"
                   value={formData.name}
                   onChange={handleChange}
+                  required
+                  className="input-focus"
+                  autoComplete="name"
                   disabled={isLoading}
                 />
               </div>
-            </div>
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email address
-              </label>
-              <div className="mt-1">
+              
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   name="email"
                   type="email"
-                  autoComplete="email"
-                  required
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
-                  placeholder="Enter your email address"
+                  placeholder="name@example.com"
                   value={formData.email}
                   onChange={handleChange}
+                  required
+                  className="input-focus"
+                  autoComplete="email"
                   disabled={isLoading}
                 />
               </div>
-            </div>
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Password
-              </label>
-              <div className="mt-1">
+              
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
                   name="password"
                   type="password"
-                  autoComplete="current-password"
-                  required
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
-                  placeholder="Enter your password"
+                  placeholder="••••••••"
                   value={formData.password}
                   onChange={handleChange}
+                  required
+                  className="input-focus"
+                  autoComplete="new-password"
                   disabled={isLoading}
                 />
               </div>
-            </div>
-            <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
-                Confirm Password
-              </label>
-              <div className="mt-1">
+              
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirm Password</Label>
                 <Input
                   id="confirmPassword"
                   name="confirmPassword"
                   type="password"
-                  autoComplete="new-password"
-                  required
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
-                  placeholder="Confirm your password"
+                  placeholder="••••••••"
                   value={formData.confirmPassword}
                   onChange={handleChange}
+                  required
+                  className="input-focus"
+                  autoComplete="new-password"
                   disabled={isLoading}
                 />
               </div>
+              
+              <Button 
+                type="submit" 
+                className="w-full btn-hover"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <div className="flex items-center">
+                    <div className="animate-spin mr-2 h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
+                    <span>Creating account...</span>
+                  </div>
+                ) : (
+                  <span>Create account</span>
+                )}
+              </Button>
+              
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-border/50"></div>
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+                </div>
+              </div>
+              
+              <Button 
+                type="button" 
+                variant="outline" 
+                className="w-full btn-hover"
+                onClick={() => alert("GitHub auth not implemented yet")}
+              >
+                <Github className="mr-2 h-4 w-4" />
+                GitHub
+              </Button>
+            </form>
+            
+            <div className="mt-6 text-center text-sm">
+              <span className="text-muted-foreground">
+                Already have an account?{' '}
+              </span>
+              <Link 
+                to="/login" 
+                className="text-primary font-medium hover:underline"
+              >
+                Sign in
+              </Link>
             </div>
           </div>
-
-          <div>
-            <Button type="submit" className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-primary hover:bg-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary" disabled={isLoading}>
-              {isLoading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Creating account...
-                </>
-              ) : (
-                "Create account"
-              )}
-            </Button>
-          </div>
-        </form>
-      </div>
+        </div>
+      </main>
+      
+      <Footer />
     </div>
   );
 };

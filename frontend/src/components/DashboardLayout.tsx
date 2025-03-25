@@ -28,6 +28,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthContext';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -128,7 +129,7 @@ const DashboardLayout = ({ children, title }: DashboardLayoutProps) => {
     <div className="min-h-screen flex bg-secondary/30">
       {/* Sidebar */}
       <aside 
-        className={`fixed inset-y-0 z-50 flex flex-col w-64 bg-white border-r border-border/40 transform transition-transform duration-300 ease-in-out md:translate-x-0 ${
+        className={`fixed inset-y-0 z-50 flex flex-col w-64 bg-card dark:bg-card border-r border-border/40 transform transition-transform duration-300 ease-in-out md:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -218,7 +219,7 @@ const DashboardLayout = ({ children, title }: DashboardLayoutProps) => {
       {/* Main content */}
       <div className="flex-1 flex flex-col md:ml-64">
         {/* Top navigation */}
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border/40 bg-white/90 backdrop-blur-sm px-4">
+        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border/40 bg-card/90 dark:bg-card/90 backdrop-blur-sm px-4">
           <button
             className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 md:hidden"
             onClick={toggleSidebar}
@@ -227,6 +228,7 @@ const DashboardLayout = ({ children, title }: DashboardLayoutProps) => {
           </button>
           
           <div className="flex-1 flex items-center justify-end space-x-4">
+            <ThemeToggle />
             <Dialog>
               <DialogTrigger asChild>
                 <button

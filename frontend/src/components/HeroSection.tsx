@@ -1,4 +1,3 @@
-
 import { ChevronRight, Clock, BarChart, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
@@ -6,12 +5,12 @@ import { Link } from 'react-router-dom';
 const HeroSection = () => {
   return (
     <div className="relative overflow-hidden pt-24 pb-20 lg:pt-28 lg:pb-28">
-      <div className="absolute inset-0 animated-gradient -z-10"></div>
-      <div className="absolute inset-0 bg-grid-pattern opacity-[0.02] -z-10"></div>
+      <div className="absolute inset-0 bg-gradient-to-br from-background to-secondary/50 dark:from-background dark:to-secondary/30 -z-10"></div>
+      <div className="absolute inset-0 bg-grid-pattern opacity-[0.02] dark:opacity-[0.03] -z-10"></div>
       
       <div className="page-container relative">
         <div className="max-w-3xl mx-auto text-center">
-          <p className="inline-flex items-center rounded-full bg-secondary/70 px-3 py-1 text-sm font-medium text-primary/90 mb-6 backdrop-blur-sm border border-secondary-foreground/10 animate-fade-in">
+          <p className="inline-flex items-center rounded-full bg-secondary/70 px-3 py-1 text-sm font-medium text-primary mb-6 backdrop-blur-sm border border-border/10 animate-fade-in">
             <span>Just launched</span>
             <span className="mx-1.5">•</span>
             <span>Track time efficiently</span>
@@ -56,11 +55,11 @@ const HeroSection = () => {
           </div>
         </div>
         
-        <div className="mt-16 md:mt-20 max-w-5xl mx-auto glass p-2 rounded-xl shadow-2xl border border-white/20 animate-scale-in">
-          <div className="aspect-[16/9] rounded-lg overflow-hidden bg-secondary/50 flex items-center justify-center">
+        <div className="mt-16 md:mt-20 max-w-5xl mx-auto bg-card/80 backdrop-blur-sm dark:bg-card/60 p-2 rounded-xl shadow-lg border border-border/20 animate-scale-in">
+          <div className="aspect-[16/9] rounded-lg overflow-hidden bg-secondary/50 dark:bg-secondary/30 flex items-center justify-center">
             <div className="text-center space-y-4">
               <div className="flex justify-center">
-                <Clock className="h-16 w-16 text-primary/80" />
+                <Clock className="h-16 w-16 text-primary" />
               </div>
               <div className="max-w-md mx-auto">
                 <p className="text-lg font-medium">

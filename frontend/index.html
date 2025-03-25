@@ -15,6 +15,32 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@lovable_dev" />
     <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    
+    <!-- Theme initialization script -->
+    <script>
+      (function() {
+        // Get theme from localStorage or use system preference
+        const savedTheme = localStorage.getItem('theme');
+        
+        if (savedTheme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else if (savedTheme === 'light') {
+          document.documentElement.classList.add('light');
+        } else {
+          // Use system preference for 'system' setting
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.classList.add(prefersDark ? 'dark' : 'light');
+          
+          // Add listener for system theme changes
+          window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (localStorage.getItem('theme') !== 'dark' && localStorage.getItem('theme') !== 'light') {
+              document.documentElement.classList.remove('dark', 'light');
+              document.documentElement.classList.add(e.matches ? 'dark' : 'light');
+            }
+          });
+        }
+      })();
+    </script>
   </head>
 
   <body>

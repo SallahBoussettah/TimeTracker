@@ -1,4 +1,3 @@
-
 import { useEffect } from 'react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -113,7 +112,7 @@ const Features = () => {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
               {Array(12).fill(0).map((_, index) => (
-                <div key={index} className="h-20 bg-white rounded-lg shadow-sm flex items-center justify-center">
+                <div key={index} className="h-20 bg-card rounded-lg shadow-sm flex items-center justify-center">
                   <span className="text-muted-foreground font-medium">Integration {index + 1}</span>
                 </div>
               ))}

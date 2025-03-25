@@ -1,4 +1,3 @@
-
 import { 
   Bell, 
   Moon, 
@@ -19,9 +18,72 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import DashboardLayout from '@/components/DashboardLayout';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeProvider';
 
 const Settings = () => {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const { theme, setTheme } = useTheme();
+  
+  // Theme state
+  const [themeState, setThemeState] = useState<'light' | 'dark' | 'system'>('system');
+  
+  // Load theme settings on component mount
+  useEffect(() => {
+    // Get from localStorage for immediate application
+    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null;
+    
+    if (savedTheme) {
+      setThemeState(savedTheme);
+      applyTheme(savedTheme);
+    } else {
+      // Default to system if no theme is set
+      applyTheme('system');
+    }
+  }, []);
+  
+  // Add an effect to listen for system theme changes
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    
+    const handleChange = () => {
+      if (themeState === 'system') {
+        applyTheme('system');
+      }
+    };
+    
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [themeState]);
+  
+  // Function to apply theme
+  const applyTheme = (selectedTheme: 'light' | 'dark' | 'system') => {
+    const root = window.document.documentElement;
+    
+    if (selectedTheme === 'system') {
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      root.classList.remove('light', 'dark');
+      root.classList.add(systemTheme);
+    } else {
+      root.classList.remove('light', 'dark');
+      root.classList.add(selectedTheme);
+    }
+  };
+  
+  // Function to set theme
+  const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
+    setThemeState(newTheme);
+    localStorage.setItem('theme', newTheme);
+    applyTheme(newTheme);
+    
+    toast({
+      title: "Theme updated",
+      description: "Your theme preference has been saved.",
+    });
+  };
   
   const handleSave = () => {
     toast({
@@ -51,15 +113,19 @@ const Settings = () => {
             <CardContent className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="timezone">Timezone</Label>
-                <Select defaultValue="pacific">
+                <Select defaultValue="casablanca">
                   <SelectTrigger>
                     <SelectValue placeholder="Select timezone" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="casablanca">Casablanca (GMT+1)</SelectItem>
                     <SelectItem value="pacific">Pacific Time (PT)</SelectItem>
                     <SelectItem value="mountain">Mountain Time (MT)</SelectItem>
                     <SelectItem value="central">Central Time (CT)</SelectItem>
                     <SelectItem value="eastern">Eastern Time (ET)</SelectItem>
+                    <SelectItem value="london">London (GMT/BST)</SelectItem>
+                    <SelectItem value="dubai">Dubai (GMT+4)</SelectItem>
+                    <SelectItem value="tokyo">Tokyo (GMT+9)</SelectItem>
                     <SelectItem value="utc">Coordinated Universal Time (UTC)</SelectItem>
                   </SelectContent>
                 </Select>
@@ -232,22 +298,66 @@ const Settings = () => {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
-                <Label>Theme</Label>
+                <div className="flex items-center justify-between mb-2">
+                  <Label>Theme</Label>
+                  <span className="text-sm text-muted-foreground">
+                    Currently: <span className="font-medium">{theme === 'system' 
+                      ? `System (${window.matchMedia('(prefers-color-scheme: dark)').matches ? 'Dark' : 'Light'})` 
+                      : theme.charAt(0).toUpperCase() + theme.slice(1)}
+                    </span>
+                  </span>
+                </div>
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="border rounded-md p-4 cursor-pointer flex items-center justify-center flex-col hover:border-primary">
-                    <Sun className="h-5 w-5 mb-2" />
+                  <div 
+                    className={`border rounded-md p-4 cursor-pointer flex items-center justify-center flex-col hover:border-primary ${theme === 'light' ? 'border-primary bg-secondary/50' : ''}`}
+                    onClick={() => setTheme('light')}
+                  >
+                    <div className="bg-white dark:bg-transparent border border-border rounded-full p-2 mb-2">
+                      <Sun className="h-5 w-5 text-amber-500" />
+                    </div>
                     <span className="text-sm">Light</span>
                   </div>
-                  <div className="border rounded-md p-4 cursor-pointer flex items-center justify-center flex-col hover:border-primary border-primary">
-                    <Moon className="h-5 w-5 mb-2" />
+                  <div 
+                    className={`border rounded-md p-4 cursor-pointer flex items-center justify-center flex-col hover:border-primary ${theme === 'dark' ? 'border-primary bg-secondary/50' : ''}`}
+                    onClick={() => setTheme('dark')}
+                  >
+                    <div className="bg-gray-900 border border-border rounded-full p-2 mb-2">
+                      <Moon className="h-5 w-5 text-indigo-300" />
+                    </div>
                     <span className="text-sm">Dark</span>
                   </div>
-                  <div className="border rounded-md p-4 cursor-pointer flex items-center justify-center flex-col hover:border-primary">
-                    <div className="flex">
-                      <Sun className="h-5 w-5" />
-                      <Moon className="h-5 w-5" />
+                  <div 
+                    className={`border rounded-md p-4 cursor-pointer flex items-center justify-center flex-col hover:border-primary ${theme === 'system' ? 'border-primary bg-secondary/50' : ''}`}
+                    onClick={() => setTheme('system')}
+                  >
+                    <div className="bg-gradient-to-r from-white to-gray-900 border border-border rounded-full p-2 mb-2">
+                      <div className="flex">
+                        <Sun className="h-5 w-5" />
+                        <Moon className="h-5 w-5" />
+                      </div>
                     </div>
-                    <span className="text-sm mt-2">System</span>
+                    <span className="text-sm">System</span>
+                  </div>
+                </div>
+                
+                <div className="mt-6 p-4 border rounded-md">
+                  <h4 className="text-sm font-medium mb-2">Theme Preview</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="rounded-md border p-3 bg-card text-card-foreground shadow">
+                      <div className="space-y-2">
+                        <div className="h-2 w-1/2 rounded-sm bg-primary"></div>
+                        <div className="h-2 w-3/4 rounded-sm bg-muted"></div>
+                        <div className="h-2 w-1/4 rounded-sm bg-accent"></div>
+                      </div>
+                    </div>
+                    <div className="rounded-md border p-3 flex items-center justify-center">
+                      <div className="flex flex-wrap gap-2">
+                        <div className="w-5 h-5 rounded-full bg-primary"></div>
+                        <div className="w-5 h-5 rounded-full bg-secondary"></div>
+                        <div className="w-5 h-5 rounded-full bg-accent"></div>
+                        <div className="w-5 h-5 rounded-full bg-muted"></div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

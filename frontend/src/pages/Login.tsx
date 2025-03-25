@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -30,9 +29,9 @@ const Login = () => {
     <div className="min-h-screen flex flex-col">
       <Header />
       
-      <main className="flex-grow flex items-center justify-center py-16 px-4 sm:px-6 lg:px-8 animated-gradient">
+      <main className="flex-grow flex items-center justify-center py-16 px-4 sm:px-6 lg:px-8 animated-gradient mt-16">
         <div className="w-full max-w-md">
-          <div className="glass rounded-2xl p-8 shadow-xl border border-white/20 animate-scale-in">
+          <div className="bg-card/90 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-border/20 animate-scale-in">
             <div className="text-center mb-8">
               <div className="flex justify-center mb-4">
                 <Clock className="h-10 w-10 text-primary" />
@@ -114,7 +113,7 @@ const Login = () => {
                   <div className="w-full border-t border-border/50"></div>
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
+                  <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
                 </div>
               </div>
               
