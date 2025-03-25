@@ -57,6 +57,17 @@ interface DisplayEntry {
 // Add a delay helper function at the top of the file
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Cache for time entries to reduce API calls
+interface TimeEntriesCache {
+  startDate: string;
+  endDate: string;
+  entries: TimeEntry[];
+  timestamp: number;
+}
+
+let timeEntriesCache: TimeEntriesCache | null = null;
+let projectsCache: Project[] | null = null;
+
 const CalendarPage = () => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -85,78 +96,83 @@ const CalendarPage = () => {
     'default': 'bg-blue-500',
   };
   
+  // Optimized fetchTimeEntries with caching
   const fetchTimeEntries = async () => {
     if (!user) return;
     
     setIsLoading(true);
-    setError(null);
     
     try {
-      // Retry logic for fetching time entries
+      const startISO = startDate.toISOString();
+      const endISO = endDate.toISOString();
+      
+      // Check if we have cached data for this date range that's less than 2 minutes old
+      const now = Date.now();
+      if (timeEntriesCache && 
+          timeEntriesCache.startDate === startISO && 
+          timeEntriesCache.endDate === endISO && 
+          now - timeEntriesCache.timestamp < 120000) {
+        console.log("Using cached time entries data");
+        setTimeEntries(timeEntriesCache.entries);
+        setIsLoading(false);
+        return;
+      }
+      
+      // If projects aren't loaded, load them first (important: do this BEFORE time entries)
+      if (!projectsCache || projects.length === 0) {
+        await fetchProjects();
+        // Add a small delay to prevent concurrent requests
+        await delay(500);
+      }
+      
+      // Now fetch time entries in a single call with retries
       let timeEntriesData = null;
       let timeEntriesError = null;
-      let projectsData = null;
-      let projectsError = null;
       
-      // Try up to 3 times with increasing delays
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) {
-          // Wait before retrying - 1s, then 2s, then 3s
-          await delay(attempt * 1000);
-          console.log(`Retry attempt ${attempt + 1} for fetching data...`);
+          await delay(1000 * attempt);
+          console.log(`Retry attempt ${attempt + 1} for time entries...`);
         }
         
         try {
-          const startISO = startDate.toISOString();
-          const endISO = endDate.toISOString();
-          
-          // Use simpler query with fewer columns to reduce payload size
-          const entriesResponse = await supabase
+          const response = await supabase
             .from('time_entries')
             .select('id, description, duration, start_time, project_id')
             .eq('user_id', user.id)
             .gte('start_time', startISO)
-            .lte('start_time', endISO);
-          
-          if (!entriesResponse.error) {
-            timeEntriesData = entriesResponse.data;
-            timeEntriesError = null;
+            .lte('start_time', endISO)
+            .order('start_time', { ascending: false });
             
-            // Add small delay between requests to avoid overwhelming the connection
-            await delay(300);
-            
-            const projectsResponse = await supabase
-              .from('projects')
-              .select('id, name')
-              .eq('user_id', user.id);
-            
-            if (!projectsResponse.error) {
-              projectsData = projectsResponse.data;
-              projectsError = null;
-              break; // Both requests successful, exit retry loop
-            } else {
-              projectsError = projectsResponse.error;
-            }
+          if (!response.error) {
+            timeEntriesData = response.data;
+            break; // Success, exit retry loop
           } else {
-            timeEntriesError = entriesResponse.error;
+            timeEntriesError = response.error;
           }
         } catch (e) {
           console.error("Network error during fetch attempt:", e);
         }
       }
       
-      // Check for errors after all retry attempts
       if (timeEntriesError) throw timeEntriesError;
-      if (projectsError) throw projectsError;
       
-      // Create a map of project IDs to names
-      const projectNameMap = new Map(projectsData?.map(p => [p.id, p.name]) || []);
+      // Create a map of project IDs to names from the cached projects
+      const projectNameMap = new Map(projectsCache?.map(p => [p.id, p.name]) || []);
       
       // Combine the data
       const entriesWithProjects = timeEntriesData?.map(entry => ({
         ...entry,
         project_name: entry.project_id ? projectNameMap.get(entry.project_id) : undefined
       })) || [];
+      
+      // Update the cache
+      timeEntriesCache = {
+        startDate: startISO,
+        endDate: endISO,
+        entries: entriesWithProjects,
+        timestamp: now
+      };
       
       setTimeEntries(entriesWithProjects);
       
@@ -174,55 +190,74 @@ const CalendarPage = () => {
     }
   };
   
-  useEffect(() => {
-    const fetchProjects = async () => {
-      if (!user) return;
+  // Optimized fetchProjects function that will be called directly
+  const fetchProjects = async (): Promise<boolean> => {
+    if (!user) return false;
+    
+    // Use cached projects if available and less than 5 minutes old
+    const now = Date.now();
+    if (projectsCache && projects.length > 0) {
+      console.log("Using cached projects data");
+      return true;
+    }
+    
+    // Implementation with retry logic
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await delay(1000 * attempt);
+        console.log(`Retry attempt ${attempt + 1} for projects...`);
+      }
       
-      // Retry logic for projects
-      for (let attempt = 0; attempt < 3; attempt++) {
-        if (attempt > 0) {
-          await delay(attempt * 1000);
-          console.log(`Retry attempt ${attempt + 1} for fetching projects...`);
-        }
-        
-        try {
-          const { data, error } = await supabase
-            .from('projects')
-            .select('id, name')
-            .eq('user_id', user.id);
-            
-          if (error) throw error;
+      try {
+        const { data, error } = await supabase
+          .from('projects')
+          .select('id, name')
+          .eq('user_id', user.id);
           
-          setProjects(data || []);
-          
-          // Setup project colors
-          const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500'];
-          data?.forEach((project, index) => {
-            projectColors[project.id] = colors[index % colors.length];
-          });
-          
-          return; // Success, exit retry loop
-        } catch (error: unknown) {
-          const pgError = error as PostgrestError;
-          console.error(`Error fetching projects (attempt ${attempt + 1}):`, pgError);
-          
-          if (attempt === 2) { // Last attempt
-            setError(pgError.message || "Could not load projects due to a server error.");
+        if (error) {
+          console.error(`Project fetch attempt ${attempt + 1} failed:`, error);
+          if (attempt === 2) {
             toast({
               title: "Error fetching projects",
-              description: pgError.message || "Could not load your projects. Please try again later.",
+              description: error.message || "Could not load your projects. Will try again later.",
               variant: "destructive"
             });
           }
+          continue; // Try again
         }
+        
+        // Success
+        projectsCache = data || [];
+        setProjects(projectsCache);
+        
+        // Setup project colors
+        const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500'];
+        projectsCache.forEach((project, index) => {
+          projectColors[project.id] = colors[index % colors.length];
+        });
+        
+        return true;
+      } catch (e) {
+        console.error(`Project fetch attempt ${attempt + 1} error:`, e);
       }
-    };
+    }
     
-    fetchProjects();
+    // All attempts failed
+    return false;
+  };
+  
+  // Load projects on component mount
+  useEffect(() => {
+    if (user) {
+      fetchProjects();
+    }
   }, [user]);
   
+  // Fetch time entries when date range changes
   useEffect(() => {
-    fetchTimeEntries();
+    if (user) {
+      fetchTimeEntries();
+    }
   }, [user, startDate, endDate]);
   
   const getEntriesForDay = (day: Date) => {
@@ -256,6 +291,7 @@ const CalendarPage = () => {
     setCurrentDate(new Date());
   };
   
+  // Optimized handleAddEntry function
   const handleAddEntry = async () => {
     if (!user) return;
     if (!newEntry.title.trim()) {
@@ -283,9 +319,9 @@ const CalendarPage = () => {
         return;
       }
       
-      const startDate = new Date(newEntry.date);
-      startDate.setHours(12, 0, 0, 0);
-      const endDate = new Date(startDate.getTime() + (durationSeconds * 1000));
+      const newEntryDate = new Date(newEntry.date);
+      newEntryDate.setHours(12, 0, 0, 0);
+      const newEndDate = new Date(newEntryDate.getTime() + (durationSeconds * 1000));
       
       const { error } = await supabase
         .from('time_entries')
@@ -294,8 +330,8 @@ const CalendarPage = () => {
           description: newEntry.title,
           project_id: newEntry.project_id || null,
           duration: durationSeconds,
-          start_time: startDate.toISOString(),
-          end_time: endDate.toISOString()
+          start_time: newEntryDate.toISOString(),
+          end_time: newEndDate.toISOString()
         });
         
       if (error) throw error;
@@ -305,6 +341,7 @@ const CalendarPage = () => {
         description: "Your time entry has been added successfully."
       });
       
+      // Reset form
       setNewEntry({
         title: '',
         project_id: '',
@@ -315,7 +352,42 @@ const CalendarPage = () => {
       });
       
       setIsDialogOpen(false);
-      fetchTimeEntries();
+      
+      // Update cache with the new entry
+      if (timeEntriesCache) {
+        const newEntryDateISO = newEntryDate.toISOString();
+        const cacheStartISO = timeEntriesCache.startDate;
+        const cacheEndISO = timeEntriesCache.endDate;
+        
+        // Only update cache if the new entry falls within the current date range
+        if (newEntryDateISO >= cacheStartISO && newEntryDateISO <= cacheEndISO) {
+          // Generate a temporary ID for the new entry
+          const tempId = `temp-${Date.now()}`;
+          
+          // Get project name from cache
+          const projectName = newEntry.project_id ? 
+            projectsCache?.find(p => p.id === newEntry.project_id)?.name : undefined;
+          
+          // Add the new entry to the cache
+          const newCacheEntry: TimeEntry = {
+            id: tempId,
+            description: newEntry.title,
+            duration: durationSeconds,
+            start_time: newEntryDateISO,
+            project_id: newEntry.project_id || null,
+            project_name: projectName
+          };
+          
+          timeEntriesCache.entries = [newCacheEntry, ...timeEntriesCache.entries];
+          setTimeEntries([...timeEntriesCache.entries]);
+        } else {
+          // If the entry is outside the current date range, invalidate cache
+          timeEntriesCache = null;
+          fetchTimeEntries();
+        }
+      } else {
+        fetchTimeEntries();
+      }
       
     } catch (error: unknown) {
       const pgError = error as PostgrestError;
