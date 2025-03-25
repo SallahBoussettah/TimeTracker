@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Respect powershell commands.
+write ; instead of && since you are on windows.
+when creating files use ; to separate them and make them in one command if possible.
+Make sure to be in the correct folder and dont run the app just write the command without running it in the terminal.

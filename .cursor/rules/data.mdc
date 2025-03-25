@@ -1,0 +1,12 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Check and analyze the files in analyse_docs folder.
+make sure to update tasks.md file on each time you finish a task.
+Code only when u analyze the databasae schema or puml filse.
+write clean code and never add unecessary fields.
+If adding fields is necessary then make sure to alter the table in the database too.
+Once you read data from analyse_docs make sure to look for the file you wanna code not directly create it and create it if you dont find it.
+as i said always read and look for the file u wanna create or edit then edit it if it exists if not then create it
