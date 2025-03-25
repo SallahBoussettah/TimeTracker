@@ -11,7 +11,7 @@ import {
   Users 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
@@ -26,7 +26,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
-import { format, addDays, startOfWeek, endOfWeek, eachDayOfInterval, isToday, isSameDay, parseISO } from 'date-fns';
+import { format, addDays, startOfWeek, endOfWeek, eachDayOfInterval, isToday, isSameDay, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthContext';
@@ -86,14 +86,42 @@ const CalendarPage = () => {
     minutes: '',
     billable: false
   });
+  const [filterProject, setFilterProject] = useState<string | null>(null);
   
-  const startDate = startOfWeek(currentDate, { weekStartsOn: 1 });
-  const endDate = endOfWeek(currentDate, { weekStartsOn: 1 });
+  const startDate = view === 'day' 
+    ? new Date(currentDate) 
+    : view === 'week'
+      ? startOfWeek(currentDate, { weekStartsOn: 1 })
+      : startOfMonth(currentDate);
+
+  const endDate = view === 'day'
+    ? new Date(currentDate)
+    : view === 'week'
+      ? endOfWeek(currentDate, { weekStartsOn: 1 })
+      : endOfMonth(currentDate);
+
   const days = eachDayOfInterval({ start: startDate, end: endDate });
   
   // Project colors map for consistent coloring
   const projectColors: Record<string, string> = {
     'default': 'bg-blue-600 text-white',
+  };
+  
+  // Function to get background color based on color class name
+  const getColorFromClass = (colorClass: string): string => {
+    if (!colorClass) return '#1d4ed8'; // Default blue
+    
+    if (colorClass.includes('blue')) return '#1d4ed8';
+    if (colorClass.includes('emerald')) return '#047857';
+    if (colorClass.includes('green')) return '#047857';
+    if (colorClass.includes('violet')) return '#7c3aed';
+    if (colorClass.includes('purple')) return '#7c3aed';
+    if (colorClass.includes('amber')) return '#b45309';
+    if (colorClass.includes('orange')) return '#b45309';
+    if (colorClass.includes('rose')) return '#be123c';
+    if (colorClass.includes('pink')) return '#be123c';
+    
+    return '#1d4ed8'; // Default fallback
   };
   
   // Optimized fetchTimeEntries with caching
@@ -103,8 +131,18 @@ const CalendarPage = () => {
     setIsLoading(true);
     
     try {
-      const startISO = startDate.toISOString();
-      const endISO = endDate.toISOString();
+      // For day view, add a buffer day on each side to ensure we get all entries
+      let startISO = startDate.toISOString();
+      let endISO = endDate.toISOString();
+      
+      if (view === 'day') {
+        const bufferStart = new Date(startDate);
+        bufferStart.setDate(bufferStart.getDate() - 1);
+        const bufferEnd = new Date(endDate);
+        bufferEnd.setDate(bufferEnd.getDate() + 1);
+        startISO = bufferStart.toISOString();
+        endISO = bufferEnd.toISOString();
+      }
       
       // Check if we have cached data for this date range that's less than 2 minutes old
       const now = Date.now();
@@ -266,34 +304,60 @@ const CalendarPage = () => {
     }
   }, [user, startDate, endDate]);
   
-  // Improved getEntriesForDay function to handle timezone issues better
+  // Add a useEffect to reset the cache when view changes
+  useEffect(() => {
+    // Clear the time entries cache when the view changes to force a refresh
+    timeEntriesCache = null;
+  }, [view]);
+  
+  // Fix getEntriesForDay to check if dates are the same by direct component comparison
   const getEntriesForDay = (day: Date) => {
-    // Set hours to 0 for comparison to avoid timezone issues
-    const comparisonDay = new Date(day);
-    comparisonDay.setHours(0, 0, 0, 0);
+    // For entries on the day we're interested in, be more permissive
+    const dayMonth = day.getMonth();
+    const dayDate = day.getDate();
+    const dayYear = day.getFullYear();
+    
+    if (view === 'day') {
+      console.log(`Looking for entries on: ${dayYear}-${dayMonth+1}-${dayDate}`);
+    }
     
     const entriesForDay = timeEntries.filter(entry => {
       try {
-        // Parse the date and normalize it for comparison
+        // Parse the entry date
         const entryDate = parseISO(entry.start_time);
-        const entryComparisonDate = new Date(entryDate);
-        entryComparisonDate.setHours(0, 0, 0, 0);
         
-        // Using simple date comparison instead of isSameDay to avoid timezone issues
-        return comparisonDay.getFullYear() === entryComparisonDate.getFullYear() && 
-               comparisonDay.getMonth() === entryComparisonDate.getMonth() && 
-               comparisonDay.getDate() === entryComparisonDate.getDate();
+        // Compare individual date components directly
+        const sameDay = entryDate.getDate() === dayDate;
+        const sameMonth = entryDate.getMonth() === dayMonth;
+        const sameYear = entryDate.getFullYear() === dayYear;
+        
+        // Filter by project if a filter is set
+        const projectMatches = !filterProject || entry.project_id === filterProject;
+        
+        // Match if all date components are the same
+        const dateMatches = sameDay && sameMonth && sameYear;
+        
+        if (view === 'day' && dateMatches) {
+          console.log(`MATCH FOUND: Entry ${entry.description} on ${format(entryDate, 'yyyy-MM-dd')}`);
+        }
+        
+        return projectMatches && dateMatches;
       } catch (e) {
-        console.error("Error parsing date:", entry.start_time, e);
+        console.error("Error parsing date:", e, entry);
         return false;
       }
     });
     
-    console.log(`Entries for ${format(day, 'EEE dd')}: `, entriesForDay);
-    
-    // If we have entries but they might not be visible, log a warning
-    if (entriesForDay.length > 0) {
-      console.log(`Found ${entriesForDay.length} entries for ${format(day, 'EEE dd')}`);
+    if (view === 'day') {
+      console.log(`Found ${entriesForDay.length} entries for ${dayYear}-${dayMonth+1}-${dayDate}`);
+      if (entriesForDay.length === 0) {
+        // Let's log all entries we have to diagnose the issue
+        console.log("Available entries:", timeEntries.map(e => ({
+          id: e.id,
+          date: e.start_time,
+          desc: e.description
+        })));
+      }
     }
     
     // Map to display format
@@ -315,12 +379,34 @@ const CalendarPage = () => {
     });
   };
   
-  const goToPreviousWeek = () => {
-    setCurrentDate(prevDate => addDays(prevDate, -7));
+  const goToPreviousView = () => {
+    if (view === 'day') {
+      setCurrentDate(prevDate => addDays(prevDate, -1));
+    } else if (view === 'week') {
+      setCurrentDate(prevDate => addDays(prevDate, -7));
+    } else {
+      // Month view - go to previous month
+      setCurrentDate(prevDate => {
+        const newDate = new Date(prevDate);
+        newDate.setMonth(newDate.getMonth() - 1);
+        return newDate;
+      });
+    }
   };
   
-  const goToNextWeek = () => {
-    setCurrentDate(prevDate => addDays(prevDate, 7));
+  const goToNextView = () => {
+    if (view === 'day') {
+      setCurrentDate(prevDate => addDays(prevDate, 1));
+    } else if (view === 'week') {
+      setCurrentDate(prevDate => addDays(prevDate, 7));
+    } else {
+      // Month view - go to next month
+      setCurrentDate(prevDate => {
+        const newDate = new Date(prevDate);
+        newDate.setMonth(newDate.getMonth() + 1);
+        return newDate;
+      });
+    }
   };
   
   const goToToday = () => {
@@ -425,15 +511,19 @@ const CalendarPage = () => {
     <DashboardLayout title="Calendar">
       <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={goToPreviousWeek}>
+          <Button variant="outline" onClick={goToPreviousView}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <Button variant="outline" onClick={goToToday}>Today</Button>
-          <Button variant="outline" onClick={goToNextWeek}>
+          <Button variant="outline" onClick={goToNextView}>
             <ChevronRight className="h-4 w-4" />
           </Button>
           <span className="text-sm font-medium">
-            {format(startDate, 'MMM d')} - {format(endDate, 'MMM d, yyyy')}
+            {view === 'day' 
+              ? format(currentDate, 'MMM d, yyyy')
+              : view === 'week'
+                ? `${format(startDate, 'MMM d')} - ${format(endDate, 'MMM d, yyyy')}`
+                : format(currentDate, 'MMMM yyyy')}
           </span>
         </div>
         
@@ -449,9 +539,49 @@ const CalendarPage = () => {
             </SelectContent>
           </Select>
           
-          <Button variant="outline" size="icon">
-            <Filter className="h-4 w-4" />
-          </Button>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="icon">
+                <Filter className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[400px]">
+              <DialogHeader>
+                <DialogTitle>Filter Entries</DialogTitle>
+                <DialogDescription>
+                  Filter time entries by project
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-4">
+                <div className="grid gap-4">
+                  <div className="grid gap-2">
+                    <label htmlFor="filter-project" className="text-sm font-medium">Project</label>
+                    <Select 
+                      value={filterProject || ''} 
+                      onValueChange={(value) => setFilterProject(value || null)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="All Projects" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">All Projects</SelectItem>
+                        {projects.map(project => (
+                          <SelectItem key={project.id} value={project.id}>
+                            {project.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setFilterProject(null)}>
+                  Clear Filter
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
@@ -564,70 +694,222 @@ const CalendarPage = () => {
         </div>
       </div>
       
-      <Card>
-        <CardContent className="p-0">
-          <div className="grid grid-cols-7 border-b">
-            {days.map((day, index) => (
-              <div 
-                key={index} 
-                className={`p-3 text-center border-r last:border-r-0 ${
-                  isToday(day) ? 'bg-primary/10 font-medium' : ''
-                }`}
-              >
-                <div className="text-sm font-medium">{format(day, 'EEE')}</div>
-                <div className={`text-lg ${isToday(day) ? 'text-primary' : ''}`}>
-                  {format(day, 'd')}
-                </div>
+      {/* Day View */}
+      {view === 'day' && (
+        <Card>
+          <CardHeader className="pb-2 flex flex-row justify-between items-center">
+            <CardTitle className="text-xl">{format(currentDate, 'EEEE, MMMM d, yyyy')}</CardTitle>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => {
+                timeEntriesCache = null;
+                fetchTimeEntries();
+                toast({
+                  title: "Calendar refreshed",
+                  description: "Refreshing data from the server"
+                });
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" className="mr-1"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+              Refresh
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="space-y-4">
+                <div className="h-14 bg-muted rounded-md animate-pulse"></div>
+                <div className="h-14 bg-muted rounded-md animate-pulse"></div>
+                <div className="h-14 bg-muted rounded-md animate-pulse"></div>
               </div>
-            ))}
-          </div>
-          
-          <div className="grid grid-cols-7 min-h-[600px]">
-            {days.map((day, dayIndex) => (
-              <div 
-                key={dayIndex} 
-                className={`p-2 border-r last:border-r-0 ${
-                  isToday(day) ? 'bg-primary/5' : ''
-                }`}
-              >
-                <div className="space-y-2">
-                  {isLoading ? (
-                    <div className="animate-pulse space-y-2">
-                      <div className="h-14 bg-muted rounded-md"></div>
-                      <div className="h-14 bg-muted rounded-md"></div>
-                    </div>
-                  ) : (
-                    <>
-                      {getEntriesForDay(day).map(entry => {
-                        console.log(`Rendering entry for ${format(day, 'EEE dd')}:`, entry);
-                        return (
+            ) : (
+              <>
+                {(() => {
+                  const entries = getEntriesForDay(currentDate);
+                  
+                  if (entries.length > 0) {
+                    return (
+                      <div className="space-y-3">
+                        {entries.map(entry => (
                           <div 
                             key={entry.id} 
-                            className={`p-2 rounded-md ${entry.color} cursor-pointer hover:opacity-90 transition-opacity shadow-sm font-medium mb-1`}
+                            className="flex items-center p-3 border rounded-md hover:bg-slate-50 transition-colors"
                           >
-                            <div className="text-sm">{entry.title}</div>
+                            <div className={`w-2 h-full min-h-[3rem] rounded-full mr-3`} 
+                                 style={{ backgroundColor: getColorFromClass(entry.color) }}></div>
+                            <div className="flex-1">
+                              <div className="font-medium">{entry.title}</div>
+                              <div className="text-sm text-muted-foreground flex justify-between">
+                                <span>{entry.project}</span>
+                                <span>{entry.duration}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="text-center py-8">
+                        <div className="text-muted-foreground">No entries for this day</div>
+                        <div className="mt-2 flex justify-center space-x-2">
+                          <Button 
+                            variant="outline" 
+                            className="mt-4"
+                            onClick={() => {
+                              setNewEntry(prev => ({
+                                ...prev,
+                                date: new Date(currentDate)
+                              }));
+                              setIsDialogOpen(true);
+                            }}
+                          >
+                            <Plus className="mr-2 h-4 w-4" />
+                            Add Entry
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  }
+                })()}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      
+      {/* Week View (unchanged) */}
+      {view === 'week' && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="grid grid-cols-7 border-b">
+              {days.map((day, index) => (
+                <div 
+                  key={index} 
+                  className={`p-3 text-center border-r last:border-r-0 ${
+                    isToday(day) ? 'bg-primary/10 font-medium' : ''
+                  }`}
+                >
+                  <div className="text-sm font-medium">{format(day, 'EEE')}</div>
+                  <div className={`text-lg ${isToday(day) ? 'text-primary' : ''}`}>
+                    {format(day, 'd')}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div className="grid grid-cols-7 min-h-[600px]">
+              {days.map((day, dayIndex) => (
+                <div 
+                  key={dayIndex} 
+                  className={`p-2 border-r last:border-r-0 ${
+                    isToday(day) ? 'bg-primary/5' : ''
+                  }`}
+                >
+                  <div className="space-y-2">
+                    {isLoading ? (
+                      <div className="animate-pulse space-y-2">
+                        <div className="h-14 bg-muted rounded-md"></div>
+                        <div className="h-14 bg-muted rounded-md"></div>
+                      </div>
+                    ) : (
+                      <>
+                        {getEntriesForDay(day).map(entry => (
+                          <div 
+                            key={entry.id} 
+                            className={`p-2 rounded-md cursor-pointer hover:opacity-90 transition-opacity shadow border border-gray-300 mb-1 text-white`}
+                            style={{ backgroundColor: getColorFromClass(entry.color) }}
+                          >
+                            <div className="text-sm font-medium">{entry.title}</div>
                             <div className="text-xs flex justify-between">
                               <span className="truncate mr-1">{entry.project}</span>
                               <span className="whitespace-nowrap">{entry.duration}</span>
                             </div>
                           </div>
-                        );
-                      })}
+                        ))}
+                        
+                        {!isLoading && getEntriesForDay(day).length === 0 && (
+                          <button
+                            className="w-full p-2 rounded-md border border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground"
+                            onClick={() => {
+                              const selectedDate = new Date(day.getTime());
+                              setNewEntry(prev => ({
+                                ...prev,
+                                date: selectedDate
+                              }));
+                              setIsDialogOpen(true);
+                            }}
+                          >
+                            <Plus className="h-4 w-4 mx-auto" />
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
+      {/* Month View */}
+      {view === 'month' && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="grid grid-cols-7 border-b">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => (
+                <div key={index} className="p-3 text-center font-medium">
+                  {day}
+                </div>
+              ))}
+            </div>
+            
+            <div className="grid grid-cols-7 min-h-[600px]">
+              {eachDayOfInterval({ 
+                start: startOfMonth(currentDate),
+                end: endOfMonth(currentDate)
+              }).map((day, dayIndex) => {
+                const entriesForThisDay = getEntriesForDay(day);
+                const hasEntries = entriesForThisDay.length > 0;
+                const isCurrentMonth = day.getMonth() === currentDate.getMonth();
+                
+                return (
+                  <div 
+                    key={dayIndex} 
+                    className={`min-h-[100px] p-2 border ${
+                      !isCurrentMonth ? 'opacity-30' : ''
+                    } ${isToday(day) ? 'bg-primary/5' : ''}`}
+                  >
+                    <div className="flex flex-col h-full">
+                      <div className={`text-sm font-medium ${isToday(day) ? 'text-primary' : ''}`}>
+                        {format(day, 'd')}
+                      </div>
                       
-                      {/* Show a message if entries exist but might have visibility issues */}
-                      {getEntriesForDay(day).length > 0 && getEntriesForDay(day).length === 0 && (
-                        <div className="p-2 rounded-md bg-yellow-100 text-yellow-800 text-xs">
-                          {getEntriesForDay(day).length} entries found but may have display issues
-                        </div>
-                      )}
+                      {/* Entry indicators */}
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {hasEntries && (
+                          <div className="flex items-center gap-1 mt-1">
+                            {entriesForThisDay.slice(0, 3).map((entry, i) => (
+                              <div 
+                                key={i}
+                                className="w-2 h-2 rounded-full"
+                                style={{ backgroundColor: getColorFromClass(entry.color) }}
+                              ></div>
+                            ))}
+                            {entriesForThisDay.length > 3 && (
+                              <span className="text-xs text-muted-foreground">+{entriesForThisDay.length - 3}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       
-                      {!isLoading && getEntriesForDay(day).length === 0 && (
+                      {/* Add button at the bottom */}
+                      <div className="mt-auto pt-1">
                         <button
-                          className="w-full p-2 rounded-md border border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-colors text-sm text-muted-foreground"
+                          className="w-full h-6 flex items-center justify-center rounded-md opacity-0 hover:opacity-100 hover:bg-primary/5 transition-opacity"
                           onClick={() => {
-                            // Create a new date object to avoid reference issues
                             const selectedDate = new Date(day.getTime());
-                            console.log("Selected date for new entry:", format(selectedDate, 'yyyy-MM-dd'));
                             setNewEntry(prev => ({
                               ...prev,
                               date: selectedDate
@@ -635,17 +917,17 @@ const CalendarPage = () => {
                             setIsDialogOpen(true);
                           }}
                         >
-                          <Plus className="h-4 w-4 mx-auto" />
+                          <Plus className="h-3 w-3" />
                         </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </DashboardLayout>
   );
 };
